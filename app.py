@@ -144,26 +144,14 @@ class ReelTranslatorApp:
         )
         self.output_area.pack(fill=tk.BOTH, padx=20, pady=5)
 
-        button_frame = tk.Frame(self.root)
-        button_frame.pack(pady=10)
-
-        self.copy_btn = tk.Button(
-            button_frame,
-            text="Copy Output",
-            font=("Arial", 11),
-            command=self.copy_output,
-            state=tk.DISABLED,
-        )
-        self.copy_btn.pack(side=tk.LEFT, padx=6)
-
         self.save_btn = tk.Button(
-            button_frame,
+            self.root,
             text="Save to SavedText Folder",
             font=("Arial", 11),
             command=self.save_to_file,
             state=tk.DISABLED,
         )
-        self.save_btn.pack(side=tk.LEFT, padx=6)
+        self.save_btn.pack(pady=10)
 
     # ---------------- Helpers ---------------- #
     def set_status(self, text, progress=None):
@@ -194,7 +182,6 @@ class ReelTranslatorApp:
 
         self.process_btn.config(state=tk.DISABLED)
         self.save_btn.config(state=tk.DISABLED)
-        self.copy_btn.config(state=tk.DISABLED)
         self.output_area.delete(1.0, tk.END)
 
         threading.Thread(
@@ -333,7 +320,6 @@ class ReelTranslatorApp:
 
             self.set_status("Done!", 100)
             self.root.after(0, lambda: self.save_btn.config(state=tk.NORMAL))
-            self.root.after(0, lambda: self.copy_btn.config(state=tk.NORMAL))
 
         except Exception as e:
             self.log_message(f"\n❌ Error: {e}")
@@ -347,17 +333,7 @@ class ReelTranslatorApp:
 
             self.root.after(0, lambda: self.process_btn.config(state=tk.NORMAL))
 
-    # ---------------- Output actions ---------------- #
-    def copy_output(self):
-        content = self.output_area.get(1.0, tk.END).strip()
-        if not content:
-            return
-
-        self.root.clipboard_clear()
-        self.root.clipboard_append(content)
-        self.root.update()
-        messagebox.showinfo("Copied", "Output copied to clipboard!")
-
+    # ---------------- Save output ---------------- #
     def save_to_file(self):
         content = self.output_area.get(1.0, tk.END).strip()
         if not content:

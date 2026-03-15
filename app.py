@@ -1,38 +1,46 @@
 import subprocess
 import sys
 import os
-import time
 import re
 from datetime import datetime
 
 # --- 1. PREVENT WINDOWLESS CRASHES ---
 class DummyWriter:
-    def write(self, x): pass
-    def flush(self): pass
+    def write(self, x):
+        pass
 
-if sys.stdout is None: sys.stdout = DummyWriter()
-if sys.stderr is None: sys.stderr = DummyWriter()
+    def flush(self):
+        pass
+
+
+if sys.stdout is None:
+    sys.stdout = DummyWriter()
+if sys.stderr is None:
+    sys.stderr = DummyWriter()
 
 # --- 2. SET UP PATHS ---
 current_dir = os.path.dirname(os.path.abspath(__file__))
-os.environ["PATH"] += os.pathsep + current_dir
+os.environ["PATH"] = os.environ.get("PATH", "") + os.pathsep + current_dir
 SAVED_FOLDER = os.path.join(current_dir, "SavedText")
-if not os.path.exists(SAVED_FOLDER):
-    os.makedirs(SAVED_FOLDER)
+os.makedirs(SAVED_FOLDER, exist_ok=True)
 
 # --- 3. AUTO-DEPENDENCY INSTALLER ---
 def ensure_dependencies():
-    required_libs = ["yt-dlp", "openai-whisper", "openai"]
-    for lib in required_libs:
+    package_to_module = {
+        "yt-dlp": "yt_dlp",
+        "openai": "openai",
+    }
+
+    for package_name, module_name in package_to_module.items():
         try:
-            if lib == "openai-whisper":
-                import whisper  # noqa: F401
-            else:
-                __import__(lib)
+            __import__(module_name)
         except ImportError:
             subprocess.run(
-                [sys.executable, "-m", "pip", "install", lib], capture_output=True
+                [sys.executable, "-m", "pip", "install", package_name],
+                capture_output=True,
+                text=True,
             )
+
 
 ensure_dependencies()
 
@@ -41,11 +49,11 @@ import tkinter as tk
 from tkinter import scrolledtext, messagebox, filedialog, ttk
 import threading
 import yt_dlp
-import whisper
 from openai import OpenAI
 
-# =====  CONSTANTS  =========================================================
-GPT_MODEL = "gpt-4o"  # easy to A/B-test later (e.g. "gpt-4o" vs "gpt-4.1")
+# ===== CONSTANTS =====
+TRANSCRIPTION_MODEL = "gpt-4o-transcribe-diarize"
+TRANSLATION_MODEL = "gpt-4o"
 
 LANGUAGE_MAP = {
     "Autodetect": None,
@@ -64,29 +72,30 @@ LANGUAGE_MAP = {
     "Russian": "ru",
 }
 
-# ===========================================================================
+
 class ReelTranslatorApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Reel Translator (Whisper-Turbo + GPT)")
-        self.root.geometry("900x820")
+        self.root.title("Reel Translator (Segmented Hosted Transcription + GPT-4o)")
+        self.root.geometry("920x840")
         self.root.resizable(True, True)
 
-        # Initialise OpenAI client safely
         api_key = os.getenv("OPENAI_API_KEY")
         self.client = OpenAI(api_key=api_key) if api_key else None
-        self.whisper_model = None
+        self.last_processed_url = ""
 
         self._build_ui()
 
     # ---------------- UI ---------------- #
     def _build_ui(self):
-        # URL Input row
         input_frame = tk.Frame(self.root, pady=8)
         input_frame.pack(fill=tk.X, padx=20)
+
         tk.Label(input_frame, text="Reel URL:", font=("Arial", 11)).pack(side=tk.LEFT)
+
         self.url_entry = tk.Entry(input_frame, font=("Arial", 11), width=55)
         self.url_entry.pack(side=tk.LEFT, padx=10)
+
         self.process_btn = tk.Button(
             input_frame,
             text="Process Reel",
@@ -97,12 +106,11 @@ class ReelTranslatorApp:
         )
         self.process_btn.pack(side=tk.LEFT)
 
-        # Language dropdown row
         lang_frame = tk.Frame(self.root, pady=2)
         lang_frame.pack(fill=tk.X, padx=20)
-        tk.Label(lang_frame, text="Source language:", font=("Arial", 11)).pack(
-            side=tk.LEFT
-        )
+
+        tk.Label(lang_frame, text="Source language:", font=("Arial", 11)).pack(side=tk.LEFT)
+
         self.language_var = tk.StringVar(value="Autodetect")
         self.lang_combo = ttk.Combobox(
             lang_frame,
@@ -113,47 +121,61 @@ class ReelTranslatorApp:
         )
         self.lang_combo.pack(side=tk.LEFT, padx=10)
 
-        # Status & Progress
         status_frame = tk.Frame(self.root, pady=5)
         status_frame.pack(fill=tk.X, padx=20)
+
         self.status_label = tk.Label(
-            status_frame, text="Ready", font=("Arial", 10, "italic"), fg="#555"
+            status_frame,
+            text="Ready",
+            font=("Arial", 10, "italic"),
+            fg="#555",
         )
         self.status_label.pack(side=tk.LEFT)
 
         self.progress_var = tk.DoubleVar()
-        self.progress_bar = ttk.Progressbar(
-            self.root, variable=self.progress_var, maximum=100
-        )
+        self.progress_bar = ttk.Progressbar(self.root, variable=self.progress_var, maximum=100)
         self.progress_bar.pack(fill=tk.X, padx=20, pady=(0, 10))
 
-        # Output area
         self.output_area = scrolledtext.ScrolledText(
-            self.root, wrap=tk.WORD, font=("Consolas", 11), height=26
+            self.root,
+            wrap=tk.WORD,
+            font=("Consolas", 11),
+            height=28,
         )
         self.output_area.pack(fill=tk.BOTH, padx=20, pady=5)
 
-        # Save button
+        button_frame = tk.Frame(self.root)
+        button_frame.pack(pady=10)
+
+        self.copy_btn = tk.Button(
+            button_frame,
+            text="Copy Output",
+            font=("Arial", 11),
+            command=self.copy_output,
+            state=tk.DISABLED,
+        )
+        self.copy_btn.pack(side=tk.LEFT, padx=6)
+
         self.save_btn = tk.Button(
-            self.root,
+            button_frame,
             text="Save to SavedText Folder",
             font=("Arial", 11),
             command=self.save_to_file,
             state=tk.DISABLED,
         )
-        self.save_btn.pack(pady=10)
+        self.save_btn.pack(side=tk.LEFT, padx=6)
 
-    # ------------- Convenience helpers ------------- #
+    # ---------------- Helpers ---------------- #
     def set_status(self, text, progress=None):
         self.root.after(0, lambda: self.status_label.config(text=text))
         if progress is not None:
             self.root.after(0, lambda: self.progress_var.set(progress))
 
-    def log_message(self, message: str):
+    def log_message(self, message: str = ""):
         self.root.after(0, lambda: self.output_area.insert(tk.END, message + "\n"))
         self.root.after(0, lambda: self.output_area.see(tk.END))
 
-    # ------------- Workflow entrypoint ------------- #
+    # ---------------- Workflow entry ---------------- #
     def start_processing(self):
         if not self.client:
             messagebox.showerror(
@@ -164,33 +186,39 @@ class ReelTranslatorApp:
 
         url = self.url_entry.get().strip()
         if not url:
+            messagebox.showwarning("Missing URL", "Please paste a Reel URL first.")
             return
+
+        self.last_processed_url = url
+        selected_language = self.language_var.get()
 
         self.process_btn.config(state=tk.DISABLED)
         self.save_btn.config(state=tk.DISABLED)
+        self.copy_btn.config(state=tk.DISABLED)
         self.output_area.delete(1.0, tk.END)
-        threading.Thread(target=self.process_video, args=(url,), daemon=True).start()
 
-    # ------------- GPT-4 Batch Translation ------------- #
-    def translate_batch_with_gpt(self, source_segments):
-        """Translate all segments in one GPT request for speed & coherence."""
+        threading.Thread(
+            target=self.process_video,
+            args=(url, selected_language),
+            daemon=True,
+        ).start()
+
+    # ---------------- GPT translation ---------------- #
+    def translate_segments_with_gpt(self, source_segments):
         if not source_segments:
             return {}
 
-        # Format numbered list
-        prompt_text = "\n".join(f"{i+1}. {txt}" for i, txt in enumerate(source_segments))
-
+        prompt_text = "\n".join(f"{i+1}. {text}" for i, text in enumerate(source_segments))
         system_msg = (
             "You are a professional foreign-language-to-English translator. "
             "You will receive a numbered list of transcript segments. "
-            "Translate each into flowing, natural English, preserving slang and nuance. "
-            "CRITICAL: Return ONLY the translated numbered list. "
-            "Do NOT add any extra text."
+            "Translate each into natural, nuanced English while preserving tone, slang, emotion, and meaning. "
+            "Return ONLY the translated numbered list. Do not add notes or commentary."
         )
 
         try:
             response = self.client.chat.completions.create(
-                model=GPT_MODEL,
+                model=TRANSLATION_MODEL,
                 messages=[
                     {"role": "system", "content": system_msg},
                     {"role": "user", "content": prompt_text},
@@ -199,20 +227,18 @@ class ReelTranslatorApp:
             )
             output = response.choices[0].message.content.strip()
 
-            # Parse back into {index: text}
             translated = {}
             for line in output.splitlines():
-                m = re.match(r"^(\d+)\.\s*(.*)", line.strip())
-                if m:
-                    translated[int(m.group(1)) - 1] = m.group(2)
+                match = re.match(r"^(\d+)\.\s*(.*)", line.strip())
+                if match:
+                    translated[int(match.group(1)) - 1] = match.group(2).strip()
             return translated
-
         except Exception as e:
             self.log_message(f"❌ Translation error: {e}")
             return {}
 
-    # ------------- Main processing chain ------------- #
-    def process_video(self, url: str):
+    # ---------------- Main processing ---------------- #
+    def process_video(self, url: str, selected_language: str):
         timestamp = datetime.now().strftime("%H%M%S")
         audio_filename = f"temp_audio_{timestamp}.mp3"
 
@@ -233,63 +259,81 @@ class ReelTranslatorApp:
                 "quiet": True,
                 "noprogress": True,
             }
+
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
 
-            # STEP 2: Load Whisper-turbo model (lazy-load once)
-            self.set_status("⏳ Loading Whisper turbo...", 35)
-            if self.whisper_model is None:
-                self.whisper_model = whisper.load_model("turbo")
+            # STEP 2: Hosted segmented transcription
+            self.set_status("⏳ Transcribing with segmented hosted transcription...", 60)
+            language_code = LANGUAGE_MAP.get(selected_language)
 
-            # STEP 3: Transcribe
-            self.set_status("⏳ Transcribing (local)...", 60)
-            selected_display = self.language_var.get()
-            language_code = LANGUAGE_MAP[selected_display]
-
+            transcription_kwargs = {
+                "model": TRANSCRIPTION_MODEL,
+                "response_format": "diarized_json",
+                "chunking_strategy": "auto",
+            }
             if language_code:
-                result = self.whisper_model.transcribe(
-                    audio_filename,
-                    language=language_code,
-                    fp16=False,
-                    condition_on_previous_text=True,
-                )
-            else:
-                result = self.whisper_model.transcribe(
-                    audio_filename,
-                    fp16=False,
-                    condition_on_previous_text=True,
-                )
-                language_code = result.get("language", "unknown")
+                transcription_kwargs["language"] = language_code
 
-            # Collect usable segments
-            valid_segments, source_texts = [], []
-            for seg in result["segments"]:
-                text = seg["text"].strip()
-                if len(text) >= 2:  # skip tiny noise blips
-                    valid_segments.append(seg)
+            with open(audio_filename, "rb") as audio_file:
+                transcript = self.client.audio.transcriptions.create(
+                    file=audio_file,
+                    **transcription_kwargs,
+                )
+
+            transcript_text = getattr(transcript, "text", "") or ""
+            segments = getattr(transcript, "segments", None) or []
+
+            usable_segments = []
+            source_texts = []
+
+            for seg in segments:
+                if isinstance(seg, dict):
+                    text = seg.get("text", "")
+                else:
+                    text = getattr(seg, "text", "")
+
+                text = (text or "").strip()
+                if len(text) >= 1:
+                    usable_segments.append({"text": text})
                     source_texts.append(text)
 
-            # STEP 4: Batch translate
-            self.set_status("⏳ Translating with GPT...", 85)
-            translated = self.translate_batch_with_gpt(source_texts)
+            # Fallback if segments are unexpectedly missing
+            if not usable_segments and transcript_text.strip():
+                usable_segments = [{"text": transcript_text.strip()}]
+                source_texts = [transcript_text.strip()]
 
-            # STEP 5: Display output
-            header_lang = (
-                selected_display if selected_display != "Autodetect" else language_code
-            )
-            self.log_message(
-                f"TRANSCRIPTION ({header_lang})  {datetime.now():%Y-%m-%d %H:%M}\n"
-                + "=" * 50
-            )
-            for i, seg in enumerate(valid_segments):
-                t_range = f"[{seg['start']:.1f}s – {seg['end']:.1f}s]"
-                src = source_texts[i]
-                en = translated.get(i, "[translation missing]")
-                self.log_message(f"{t_range}\nSRC: {src}\nEN:  {en}\n")
+            if not source_texts:
+                raise ValueError("No transcription text was returned.")
 
-            self.log_message("=" * 50 + "\n✅ Finished!")
+            # STEP 3: Translate segment-by-segment (batched in one GPT call)
+            self.set_status("⏳ Translating with GPT-4o...", 85)
+            translated = self.translate_segments_with_gpt(source_texts)
+
+            detected_language = getattr(transcript, "language", None)
+            if not detected_language and selected_language != "Autodetect":
+                detected_language = selected_language
+            elif not detected_language:
+                detected_language = "Autodetect"
+
+            # STEP 4: Display output
+            header = (
+                f"TRANSCRIPTION ({detected_language}) | {datetime.now():%Y-%m-%d %H:%M} | URL: {url}"
+            )
+            self.log_message(header)
+            self.log_message("=" * 80)
+
+            for i, seg in enumerate(usable_segments):
+                self.log_message(f"Original: {seg['text']}")
+                self.log_message(f"EN:  {translated.get(i, '[translation unavailable]')}")
+                self.log_message("")
+
+            self.log_message("=" * 80)
+            self.log_message("✅ Finished!")
+
             self.set_status("Done!", 100)
             self.root.after(0, lambda: self.save_btn.config(state=tk.NORMAL))
+            self.root.after(0, lambda: self.copy_btn.config(state=tk.NORMAL))
 
         except Exception as e:
             self.log_message(f"\n❌ Error: {e}")
@@ -300,25 +344,39 @@ class ReelTranslatorApp:
                     os.remove(audio_filename)
                 except Exception:
                     pass
+
             self.root.after(0, lambda: self.process_btn.config(state=tk.NORMAL))
 
-    # ------------- Save output ------------- #
+    # ---------------- Output actions ---------------- #
+    def copy_output(self):
+        content = self.output_area.get(1.0, tk.END).strip()
+        if not content:
+            return
+
+        self.root.clipboard_clear()
+        self.root.clipboard_append(content)
+        self.root.update()
+        messagebox.showinfo("Copied", "Output copied to clipboard!")
+
     def save_to_file(self):
         content = self.output_area.get(1.0, tk.END).strip()
         if not content:
             return
+
         fname = f"Reel_{datetime.now():%Y-%m-%d_%H%M}.txt"
         path = filedialog.asksaveasfilename(
             initialdir=SAVED_FOLDER,
             initialfile=fname,
             defaultextension=".txt",
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
         )
+
         if path:
             with open(path, "w", encoding="utf-8") as f:
                 f.write(content)
             messagebox.showinfo("Success", "File saved!")
 
-# ------------------- RUN ------------------- #
+
 if __name__ == "__main__":
     root = tk.Tk()
     app = ReelTranslatorApp(root)

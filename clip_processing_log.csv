@@ -8,3 +8,5 @@ timestamp,outcome,stage,url,selected_language,detected_language,transcription_mo
 2026-03-14 23:13:50,STARTED,start,https://www.instagram.com/p/DRbB1c0CdqZ/,Autodetect,,gpt-4o-transcribe-diarize,gpt-4o,,
 2026-03-14 23:14:09,STARTED,start,https://www.instagram.com/p/DRbB1c0CdqZ/,Japanese,,gpt-4o-transcribe-diarize,gpt-4o,,
 2026-03-14 23:14:39,SUCCESS,complete,https://www.instagram.com/p/DRbB1c0CdqZ/,Japanese,Japanese,gpt-4o-transcribe-diarize,gpt-4o,,
+2026-03-14 23:22:55,STARTED,start,https://www.instagram.com/p/DRlZrjRiYo9/,Japanese,,gpt-4o-transcribe-diarize,gpt-4o,,
+2026-03-14 23:22:56,POSSIBLE_SAFETY_BLOCK,download,https://www.instagram.com/p/DRlZrjRiYo9/,Japanese,,gpt-4o-transcribe-diarize,gpt-4o,DownloadError,ERROR: [Instagram] DRlZrjRiYo9: This content may be inappropriate: It's unavailable for certain audiences.

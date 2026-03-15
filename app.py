@@ -29,6 +29,7 @@ def ensure_dependencies():
     package_to_module = {
         "yt-dlp": "yt_dlp",
         "openai": "openai",
+        "customtkinter": "customtkinter",
     }
 
     for package_name, module_name in package_to_module.items():
@@ -45,9 +46,11 @@ def ensure_dependencies():
 ensure_dependencies()
 
 # --- 4. MAIN APPLICATION ---
-import tkinter as tk
-from tkinter import scrolledtext, messagebox, filedialog, ttk
 import threading
+import tkinter as tk
+from tkinter import filedialog, messagebox
+
+import customtkinter as ctk
 import yt_dlp
 from openai import OpenAI
 
@@ -72,96 +75,329 @@ LANGUAGE_MAP = {
     "Russian": "ru",
 }
 
+# ===== THEME =====
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("dark-blue")
+
+BG = "#0b0d12"
+CARD = "#11141d"
+CARD_2 = "#151927"
+BORDER = "#242938"
+TEXT = "#f3f4f6"
+TEXT_MUTED = "#9ca3af"
+ACCENT = "#4f46e5"
+ACCENT_HOVER = "#5b52f1"
+UNSELECTED = "#1a1f2b"
+UNSELECTED_HOVER = "#222838"
+INPUT_BG = "#0f1320"
+PROGRESS_BG = "#1a1f2b"
+
 
 class ReelTranslatorApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Reel Translator (Segmented Hosted Transcription + GPT-4o)")
-        self.root.geometry("920x840")
-        self.root.resizable(True, True)
+        self.root.title("Reel Translator")
+        self.root.geometry("1280x820")
+        self.root.minsize(1080, 700)
 
         api_key = os.getenv("OPENAI_API_KEY")
         self.client = OpenAI(api_key=api_key) if api_key else None
         self.last_processed_url = ""
 
+        self.language_var = tk.StringVar(value="Autodetect")
+        self.language_buttons = {}
+
         self._build_ui()
 
     # ---------------- UI ---------------- #
     def _build_ui(self):
-        input_frame = tk.Frame(self.root, pady=8)
-        input_frame.pack(fill=tk.X, padx=20)
+        self.root.configure(bg=BG)
 
-        tk.Label(input_frame, text="Reel URL:", font=("Arial", 11)).pack(side=tk.LEFT)
+        self.main_shell = ctk.CTkFrame(self.root, fg_color=BG, corner_radius=0)
+        self.main_shell.pack(fill="both", expand=True, padx=18, pady=18)
 
-        self.url_entry = tk.Entry(input_frame, font=("Arial", 11), width=55)
-        self.url_entry.pack(side=tk.LEFT, padx=10)
+        self.main_shell.grid_columnconfigure(0, weight=4)
+        self.main_shell.grid_columnconfigure(1, weight=1)
+        self.main_shell.grid_rowconfigure(0, weight=1)
 
-        self.process_btn = tk.Button(
-            input_frame,
-            text="Process Reel",
-            font=("Arial", 10, "bold"),
-            bg="#007bff",
-            fg="white",
-            command=self.start_processing,
+        self._build_workspace_panel()
+        self._build_language_panel()
+
+    def _build_workspace_panel(self):
+        self.workspace_panel = ctk.CTkFrame(
+            self.main_shell,
+            fg_color=CARD,
+            corner_radius=24,
+            border_width=1,
+            border_color=BORDER,
         )
-        self.process_btn.pack(side=tk.LEFT)
+        self.workspace_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 14), pady=0)
 
-        lang_frame = tk.Frame(self.root, pady=2)
-        lang_frame.pack(fill=tk.X, padx=20)
+        self.workspace_panel.grid_rowconfigure(2, weight=1)
+        self.workspace_panel.grid_columnconfigure(0, weight=1)
 
-        tk.Label(lang_frame, text="Source language:", font=("Arial", 11)).pack(side=tk.LEFT)
+        # Header
+        header = ctk.CTkFrame(self.workspace_panel, fg_color="transparent")
+        header.grid(row=0, column=0, sticky="ew", padx=18, pady=(16, 10))
+        header.grid_columnconfigure(0, weight=1)
 
-        self.language_var = tk.StringVar(value="Autodetect")
-        self.lang_combo = ttk.Combobox(
-            lang_frame,
-            textvariable=self.language_var,
-            values=list(LANGUAGE_MAP.keys()),
-            state="readonly",
-            width=22,
+        title_block = ctk.CTkFrame(header, fg_color="transparent")
+        title_block.grid(row=0, column=0, sticky="w")
+
+        self.title_label = ctk.CTkLabel(
+            title_block,
+            text="Transcript Workspace",
+            font=ctk.CTkFont(size=24, weight="bold"),
+            text_color=TEXT,
         )
-        self.lang_combo.pack(side=tk.LEFT, padx=10)
+        self.title_label.pack(anchor="w")
 
-        status_frame = tk.Frame(self.root, pady=5)
-        status_frame.pack(fill=tk.X, padx=20)
+        self.subtitle_label = ctk.CTkLabel(
+            title_block,
+            text="Hosted transcription + nuanced English translation",
+            font=ctk.CTkFont(size=13),
+            text_color=TEXT_MUTED,
+        )
+        self.subtitle_label.pack(anchor="w", pady=(3, 0))
 
-        self.status_label = tk.Label(
+        actions_block = ctk.CTkFrame(header, fg_color="transparent")
+        actions_block.grid(row=0, column=1, sticky="e")
+
+        self.save_btn = ctk.CTkButton(
+            actions_block,
+            text="Save Output",
+            width=120,
+            height=38,
+            corner_radius=12,
+            fg_color=UNSELECTED,
+            hover_color=UNSELECTED_HOVER,
+            text_color=TEXT,
+            state="disabled",
+            command=self.save_to_file,
+        )
+        self.save_btn.pack(side="right")
+
+        # Status + progress
+        status_frame = ctk.CTkFrame(
+            self.workspace_panel,
+            fg_color=CARD_2,
+            corner_radius=18,
+            border_width=1,
+            border_color=BORDER,
+            height=78,
+        )
+        status_frame.grid(row=1, column=0, sticky="ew", padx=18, pady=(0, 12))
+        status_frame.grid_columnconfigure(0, weight=1)
+
+        self.status_label = ctk.CTkLabel(
             status_frame,
             text="Ready",
-            font=("Arial", 10, "italic"),
-            fg="#555",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color=TEXT,
         )
-        self.status_label.pack(side=tk.LEFT)
+        self.status_label.grid(row=0, column=0, sticky="w", padx=16, pady=(12, 4))
 
-        self.progress_var = tk.DoubleVar()
-        self.progress_bar = ttk.Progressbar(self.root, variable=self.progress_var, maximum=100)
-        self.progress_bar.pack(fill=tk.X, padx=20, pady=(0, 10))
-
-        self.output_area = scrolledtext.ScrolledText(
-            self.root,
-            wrap=tk.WORD,
-            font=("Consolas", 11),
-            height=28,
+        self.status_hint = ctk.CTkLabel(
+            status_frame,
+            text="Paste a clip URL below and process when ready.",
+            font=ctk.CTkFont(size=12),
+            text_color=TEXT_MUTED,
         )
-        self.output_area.pack(fill=tk.BOTH, padx=20, pady=5)
+        self.status_hint.grid(row=1, column=0, sticky="w", padx=16, pady=(0, 8))
 
-        self.save_btn = tk.Button(
-            self.root,
-            text="Save to SavedText Folder",
-            font=("Arial", 11),
-            command=self.save_to_file,
-            state=tk.DISABLED,
+        self.progress_bar = ctk.CTkProgressBar(
+            status_frame,
+            progress_color=ACCENT,
+            fg_color=PROGRESS_BG,
+            corner_radius=100,
+            height=10,
         )
-        self.save_btn.pack(pady=10)
+        self.progress_bar.grid(row=2, column=0, sticky="ew", padx=16, pady=(0, 12))
+        self.progress_bar.set(0)
+
+        # Output area
+        output_wrapper = ctk.CTkFrame(
+            self.workspace_panel,
+            fg_color=INPUT_BG,
+            corner_radius=20,
+            border_width=1,
+            border_color=BORDER,
+        )
+        output_wrapper.grid(row=2, column=0, sticky="nsew", padx=18, pady=(0, 14))
+        output_wrapper.grid_rowconfigure(0, weight=1)
+        output_wrapper.grid_columnconfigure(0, weight=1)
+
+        self.output_area = ctk.CTkTextbox(
+            output_wrapper,
+            wrap="word",
+            font=ctk.CTkFont(family="Consolas", size=15),
+            text_color=TEXT,
+            fg_color=INPUT_BG,
+            corner_radius=18,
+            border_width=0,
+            activate_scrollbars=True,
+        )
+        self.output_area.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        self.output_area.insert("1.0", "Your bilingual transcript will appear here.\n")
+        self.output_area.configure(state="disabled")
+
+        # Bottom URL bar
+        bottom_bar = ctk.CTkFrame(
+            self.workspace_panel,
+            fg_color=CARD_2,
+            corner_radius=18,
+            border_width=1,
+            border_color=BORDER,
+            height=82,
+        )
+        bottom_bar.grid(row=3, column=0, sticky="ew", padx=18, pady=(0, 18))
+        bottom_bar.grid_columnconfigure(0, weight=1)
+
+        url_label = ctk.CTkLabel(
+            bottom_bar,
+            text="Clip URL",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=TEXT_MUTED,
+        )
+        url_label.grid(row=0, column=0, sticky="w", padx=16, pady=(10, 4), columnspan=2)
+
+        self.url_entry = ctk.CTkEntry(
+            bottom_bar,
+            height=44,
+            corner_radius=14,
+            fg_color=INPUT_BG,
+            border_color=BORDER,
+            text_color=TEXT,
+            placeholder_text="Paste Reel or YouTube URL here...",
+        )
+        self.url_entry.grid(row=1, column=0, sticky="ew", padx=(16, 10), pady=(0, 14))
+
+        self.process_btn = ctk.CTkButton(
+            bottom_bar,
+            text="Process Reel",
+            width=150,
+            height=44,
+            corner_radius=14,
+            fg_color=ACCENT,
+            hover_color=ACCENT_HOVER,
+            text_color="white",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            command=self.start_processing,
+        )
+        self.process_btn.grid(row=1, column=1, sticky="e", padx=(0, 16), pady=(0, 14))
+
+    def _build_language_panel(self):
+        self.language_panel = ctk.CTkFrame(
+            self.main_shell,
+            fg_color=CARD,
+            corner_radius=24,
+            border_width=1,
+            border_color=BORDER,
+        )
+        self.language_panel.grid(row=0, column=1, sticky="nsew")
+
+        self.language_panel.grid_rowconfigure(1, weight=1)
+        self.language_panel.grid_columnconfigure(0, weight=1)
+
+        top = ctk.CTkFrame(self.language_panel, fg_color="transparent")
+        top.grid(row=0, column=0, sticky="ew", padx=18, pady=(18, 12))
+
+        lang_title = ctk.CTkLabel(
+            top,
+            text="Source Language",
+            font=ctk.CTkFont(size=20, weight="bold"),
+            text_color=TEXT,
+        )
+        lang_title.pack(anchor="w")
+
+        lang_subtitle = ctk.CTkLabel(
+            top,
+            text="Select one option. Backend behavior stays the same.",
+            font=ctk.CTkFont(size=12),
+            text_color=TEXT_MUTED,
+            justify="left",
+            wraplength=220,
+        )
+        lang_subtitle.pack(anchor="w", pady=(4, 0))
+
+        self.language_list = ctk.CTkScrollableFrame(
+            self.language_panel,
+            fg_color=CARD_2,
+            corner_radius=18,
+            border_width=1,
+            border_color=BORDER,
+        )
+        self.language_list.grid(row=1, column=0, sticky="nsew", padx=18, pady=(0, 14))
+
+        for language_name in LANGUAGE_MAP.keys():
+            btn = ctk.CTkButton(
+                self.language_list,
+                text=language_name,
+                anchor="w",
+                height=42,
+                corner_radius=12,
+                fg_color=UNSELECTED,
+                hover_color=UNSELECTED_HOVER,
+                text_color=TEXT,
+                font=ctk.CTkFont(size=13, weight="bold" if language_name == "Autodetect" else "normal"),
+                command=lambda name=language_name: self.select_language(name),
+            )
+            btn.pack(fill="x", pady=5, padx=6)
+            self.language_buttons[language_name] = btn
+
+        self.selection_badge = ctk.CTkLabel(
+            self.language_panel,
+            text="Selected: Autodetect",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=TEXT_MUTED,
+        )
+        self.selection_badge.grid(row=2, column=0, sticky="w", padx=18, pady=(0, 6))
+
+        self.update_language_button_states()
+
+    def select_language(self, language_name: str):
+        self.language_var.set(language_name)
+        self.selection_badge.configure(text=f"Selected: {language_name}")
+        self.update_language_button_states()
+
+    def update_language_button_states(self):
+        selected = self.language_var.get()
+        for name, button in self.language_buttons.items():
+            if name == selected:
+                button.configure(
+                    fg_color=ACCENT,
+                    hover_color=ACCENT_HOVER,
+                    text_color="white",
+                )
+            else:
+                button.configure(
+                    fg_color=UNSELECTED,
+                    hover_color=UNSELECTED_HOVER,
+                    text_color=TEXT,
+                )
 
     # ---------------- Helpers ---------------- #
-    def set_status(self, text, progress=None):
-        self.root.after(0, lambda: self.status_label.config(text=text))
+    def set_status(self, text, progress=None, hint=None):
+        self.root.after(0, lambda: self.status_label.configure(text=text))
+        if hint is not None:
+            self.root.after(0, lambda: self.status_hint.configure(text=hint))
         if progress is not None:
-            self.root.after(0, lambda: self.progress_var.set(progress))
+            self.root.after(0, lambda: self.progress_bar.set(progress / 100.0))
+
+    def clear_output(self):
+        def _clear():
+            self.output_area.configure(state="normal")
+            self.output_area.delete("1.0", "end")
+            self.output_area.configure(state="disabled")
+        self.root.after(0, _clear)
 
     def log_message(self, message: str = ""):
-        self.root.after(0, lambda: self.output_area.insert(tk.END, message + "\n"))
-        self.root.after(0, lambda: self.output_area.see(tk.END))
+        def _write():
+            self.output_area.configure(state="normal")
+            self.output_area.insert("end", message + "\n")
+            self.output_area.see("end")
+            self.output_area.configure(state="disabled")
+        self.root.after(0, _write)
 
     # ---------------- Workflow entry ---------------- #
     def start_processing(self):
@@ -174,15 +410,20 @@ class ReelTranslatorApp:
 
         url = self.url_entry.get().strip()
         if not url:
-            messagebox.showwarning("Missing URL", "Please paste a Reel URL first.")
+            messagebox.showwarning("Missing URL", "Please paste a Reel or YouTube URL first.")
             return
 
         self.last_processed_url = url
         selected_language = self.language_var.get()
 
-        self.process_btn.config(state=tk.DISABLED)
-        self.save_btn.config(state=tk.DISABLED)
-        self.output_area.delete(1.0, tk.END)
+        self.process_btn.configure(state="disabled")
+        self.save_btn.configure(state="disabled")
+        self.clear_output()
+        self.set_status(
+            "Working...",
+            0,
+            "Downloading audio, transcribing, and translating.",
+        )
 
         threading.Thread(
             target=self.process_video,
@@ -231,7 +472,7 @@ class ReelTranslatorApp:
 
         try:
             # STEP 1: Download audio
-            self.set_status("⏳ Downloading audio...", 15)
+            self.set_status("Downloading audio...", 15, "Fetching and extracting the clip audio.")
             ydl_opts = {
                 "format": "bestaudio/best",
                 "outtmpl": audio_filename.replace(".mp3", ""),
@@ -251,7 +492,7 @@ class ReelTranslatorApp:
                 ydl.download([url])
 
             # STEP 2: Hosted segmented transcription
-            self.set_status("⏳ Transcribing with segmented hosted transcription...", 60)
+            self.set_status("Transcribing...", 60, "Running hosted transcription on the audio.")
             language_code = LANGUAGE_MAP.get(selected_language)
 
             transcription_kwargs = {
@@ -285,7 +526,6 @@ class ReelTranslatorApp:
                     usable_segments.append({"text": text})
                     source_texts.append(text)
 
-            # Fallback if segments are unexpectedly missing
             if not usable_segments and transcript_text.strip():
                 usable_segments = [{"text": transcript_text.strip()}]
                 source_texts = [transcript_text.strip()]
@@ -293,8 +533,8 @@ class ReelTranslatorApp:
             if not source_texts:
                 raise ValueError("No transcription text was returned.")
 
-            # STEP 3: Translate segment-by-segment (batched in one GPT call)
-            self.set_status("⏳ Translating with GPT-4o...", 85)
+            # STEP 3: Translate
+            self.set_status("Translating...", 85, "Turning the transcript into natural English.")
             translated = self.translate_segments_with_gpt(source_texts)
 
             detected_language = getattr(transcript, "language", None)
@@ -318,12 +558,12 @@ class ReelTranslatorApp:
             self.log_message("=" * 80)
             self.log_message("✅ Finished!")
 
-            self.set_status("Done!", 100)
-            self.root.after(0, lambda: self.save_btn.config(state=tk.NORMAL))
+            self.set_status("Done!", 100, "Transcript and translation are ready.")
+            self.root.after(0, lambda: self.save_btn.configure(state="normal"))
 
         except Exception as e:
             self.log_message(f"\n❌ Error: {e}")
-            self.set_status("Error occurred.", 0)
+            self.set_status("Error occurred.", 0, "Something went wrong while processing the clip.")
         finally:
             if os.path.exists(audio_filename):
                 try:
@@ -331,11 +571,11 @@ class ReelTranslatorApp:
                 except Exception:
                     pass
 
-            self.root.after(0, lambda: self.process_btn.config(state=tk.NORMAL))
+            self.root.after(0, lambda: self.process_btn.configure(state="normal"))
 
     # ---------------- Save output ---------------- #
     def save_to_file(self):
-        content = self.output_area.get(1.0, tk.END).strip()
+        content = self.output_area.get("1.0", "end").strip()
         if not content:
             return
 
@@ -354,6 +594,6 @@ class ReelTranslatorApp:
 
 
 if __name__ == "__main__":
-    root = tk.Tk()
+    root = ctk.CTk()
     app = ReelTranslatorApp(root)
     root.mainloop()

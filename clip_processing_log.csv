@@ -1,0 +1,10 @@
+timestamp,outcome,stage,url,selected_language,detected_language,transcription_model,translation_model,error_type,error_message
+2026-03-14 23:03:48,STARTED,start,https://www.instagram.com/p/DRbB1c0CdqZ/,Japanese,,gpt-4o-transcribe-diarize,gpt-4o,,
+2026-03-14 23:04:16,SUCCESS,complete,https://www.instagram.com/p/DRbB1c0CdqZ/,Japanese,Japanese,gpt-4o-transcribe-diarize,gpt-4o,,
+2026-03-14 23:05:42,STARTED,start,https://www.instagram.com/p/DV0Z1pAgXCS/,Japanese,,gpt-4o-transcribe-diarize,gpt-4o,,
+2026-03-14 23:05:43,POSSIBLE_SAFETY_BLOCK,download,https://www.instagram.com/p/DV0Z1pAgXCS/,Japanese,,gpt-4o-transcribe-diarize,gpt-4o,DownloadError,[0;31mERROR:[0m [Instagram] DV0Z1pAgXCS: This content may be inappropriate: It's unavailable for certain audiences.
+2026-03-14 23:09:05,STARTED,start,https://www.instagram.com/p/DRbB1c0CdqZ/,Japanese,,gpt-4o-transcribe-diarize,gpt-4o,,
+2026-03-14 23:09:33,SUCCESS,complete,https://www.instagram.com/p/DRbB1c0CdqZ/,Japanese,Japanese,gpt-4o-transcribe-diarize,gpt-4o,,
+2026-03-14 23:13:50,STARTED,start,https://www.instagram.com/p/DRbB1c0CdqZ/,Autodetect,,gpt-4o-transcribe-diarize,gpt-4o,,
+2026-03-14 23:14:09,STARTED,start,https://www.instagram.com/p/DRbB1c0CdqZ/,Japanese,,gpt-4o-transcribe-diarize,gpt-4o,,
+2026-03-14 23:14:39,SUCCESS,complete,https://www.instagram.com/p/DRbB1c0CdqZ/,Japanese,Japanese,gpt-4o-transcribe-diarize,gpt-4o,,

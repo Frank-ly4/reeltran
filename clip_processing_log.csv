@@ -10,3 +10,5 @@ timestamp,outcome,stage,url,selected_language,detected_language,transcription_mo
 2026-03-14 23:14:39,SUCCESS,complete,https://www.instagram.com/p/DRbB1c0CdqZ/,Japanese,Japanese,gpt-4o-transcribe-diarize,gpt-4o,,
 2026-03-14 23:22:55,STARTED,start,https://www.instagram.com/p/DRlZrjRiYo9/,Japanese,,gpt-4o-transcribe-diarize,gpt-4o,,
 2026-03-14 23:22:56,POSSIBLE_SAFETY_BLOCK,download,https://www.instagram.com/p/DRlZrjRiYo9/,Japanese,,gpt-4o-transcribe-diarize,gpt-4o,DownloadError,ERROR: [Instagram] DRlZrjRiYo9: This content may be inappropriate: It's unavailable for certain audiences.
+2026-04-04 17:23:23,STARTED,start,https://youtu.be/tXGoj10MZVM?si=n41Re_GmxhsRMbaN,Thai,,gpt-4o-transcribe-diarize,gpt-4o,,
+2026-04-04 17:23:36,ERROR,transcription,https://youtu.be/tXGoj10MZVM?si=n41Re_GmxhsRMbaN,Thai,,gpt-4o-transcribe-diarize,gpt-4o,ValueError,No transcription text was returned.
